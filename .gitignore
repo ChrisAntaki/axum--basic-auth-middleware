@@ -1,0 +1,20 @@
+# System and IDE files
+Thumbs.db
+.DS_Store
+.vscode
+
+# Dependencies
+/node_modules/
+
+# Artifacts
+/coverage/
+/dist
+/stats.html
+target/
+
+# Local Netlify folder
+.netlify
+
+# Rust
+rustc-*
+.shuttle-storage
