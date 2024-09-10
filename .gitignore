@@ -18,3 +18,4 @@ target/
 # Rust
 rustc-*
 .shuttle-storage
+mutants*/
