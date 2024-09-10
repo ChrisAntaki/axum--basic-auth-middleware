@@ -9,4 +9,4 @@ axum-extra = { version = "0.9.3", features = ["cookie"] }
 base64ct = { version = "1.6.0", features = ["alloc"] }
 futures-util = "0.3.30"
 time = "0.3.36"
-tower = "0.4.13"
+tower = "0.5.1"
