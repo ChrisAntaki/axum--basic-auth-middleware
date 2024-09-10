@@ -12,6 +12,7 @@ use std::{
 };
 use tower::{Layer, Service};
 
+/// A layer that adds basic authentication to a service.
 #[derive(Clone)]
 pub struct BasicAuth {
     credentials: HashSet<&'static str>,
@@ -57,7 +58,7 @@ where
 
     fn call(&mut self, request: Request) -> Self::Future {
         // Authenticate the request.
-        if let Some(response) = self.authenticate(&request) {
+        if let Some(response) = authenticate(&self.credentials, &request) {
             return Box::pin(async move { Ok(response) });
         }
 
@@ -70,60 +71,58 @@ where
     }
 }
 
-impl<S> BasicAuthMiddleware<S> {
-    fn authenticate(&self, request: &Request) -> Option<Response> {
-        // Get headers.
-        let headers = request.headers();
+fn authenticate(credentials: &HashSet<&str>, request: &Request) -> Option<Response> {
+    // Get headers.
+    let headers = request.headers();
 
-        // Check session cookie.
-        let cookies = CookieJar::from_headers(headers);
-        if let Some(cookie) = cookies.get("session") {
-            if self.credentials.contains(cookie.value()) {
-                // Session cookie is valid.
-                return None;
-            }
+    // Check session cookie.
+    let cookies = CookieJar::from_headers(headers);
+    if let Some(cookie) = cookies.get("session") {
+        if credentials.contains(cookie.value()) {
+            // Session cookie is valid.
+            return None;
         }
-
-        // Check if the header is present.
-        let auth = headers.get("Authorization");
-        if let None = auth {
-            return unauthorized();
-        }
-
-        // Check if the header is well-formed.
-        let auth = auth.unwrap().to_str().unwrap();
-        let split = auth.split_once(' ');
-        if let None = split {
-            return bad_request();
-        }
-
-        // Check if the header is basic auth.
-        let (name, contents) = split.unwrap();
-        if name != "Basic" {
-            return bad_request();
-        }
-
-        // Decode the contents.
-        let decoded = Base64::decode_vec(contents).unwrap();
-        let decoded = std::str::from_utf8(decoded.as_slice()).unwrap();
-
-        // Check if the credentials are valid.
-        if !self.credentials.contains(decoded) {
-            return unauthorized();
-        }
-
-        // Set session cookie and redirect.
-        let cookie = Cookie::build(("session", decoded.to_owned()))
-            .same_site(axum_extra::extract::cookie::SameSite::Lax)
-            .http_only(true)
-            .max_age(Duration::MAX)
-            .build();
-        let cookies = cookies.add(cookie);
-        let path = request.uri().path_and_query().unwrap().as_str();
-        let redirect = Redirect::temporary(path);
-        let response = (cookies, redirect).into_response();
-        Some(response)
     }
+
+    // Check if the header is present.
+    let auth = headers.get("Authorization");
+    if let None = auth {
+        return unauthorized();
+    }
+
+    // Check if the header is well-formed.
+    let auth = auth.unwrap().to_str().unwrap();
+    let split = auth.split_once(' ');
+    if let None = split {
+        return bad_request();
+    }
+
+    // Check if the header is basic auth.
+    let (name, contents) = split.unwrap();
+    if name != "Basic" {
+        return bad_request();
+    }
+
+    // Decode the contents.
+    let decoded = Base64::decode_vec(contents).unwrap();
+    let decoded = std::str::from_utf8(decoded.as_slice()).unwrap();
+
+    // Check if the credentials are valid.
+    if !credentials.contains(decoded) {
+        return unauthorized();
+    }
+
+    // Set session cookie and redirect.
+    let cookie = Cookie::build(("session", decoded.to_owned()))
+        .same_site(axum_extra::extract::cookie::SameSite::Lax)
+        .http_only(true)
+        .max_age(Duration::MAX)
+        .build();
+    let cookies = cookies.add(cookie);
+    let path = request.uri().path_and_query().unwrap().as_str();
+    let redirect = Redirect::temporary(path);
+    let response = (cookies, redirect).into_response();
+    Some(response)
 }
 
 /// Returns a `400 Bad Request` response.
@@ -147,4 +146,107 @@ fn unauthorized() -> Option<Response> {
             .body("<html><strong>Please</strong> sign in.</html>".into())
             .unwrap(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+
+    const CREDENTIALS: &str = "user:pass";
+    const BAD_CREDENTIALS: &str = "bad:pass";
+
+    fn get_hashset() -> HashSet<&'static str> {
+        HashSet::from([CREDENTIALS])
+    }
+
+    #[test]
+    fn test_no_credentials() {
+        let request: Request<Body> = Request::builder().body("".into()).unwrap();
+        let response = authenticate(&get_hashset(), &request);
+        assert!(response.is_some());
+
+        // Expect a `401 Unauthorized` response.
+        assert_eq!(401, response.as_ref().unwrap().status());
+    }
+
+    #[test]
+    fn test_good_credentials_in_cookie() {
+        let request: Request<Body> = Request::builder()
+            .header("Cookie", format!("session={}", CREDENTIALS))
+            .body("".into())
+            .unwrap();
+        let response = authenticate(&get_hashset(), &request);
+
+        // Expect no response from this layer.
+        // The app can answer.
+        assert!(response.is_none());
+    }
+
+    #[test]
+    fn test_good_credentials_in_header() {
+        let request: Request<Body> = Request::builder()
+            .header(
+                "Authorization",
+                format!("Basic {}", Base64::encode_string(CREDENTIALS.as_bytes())),
+            )
+            .body("".into())
+            .unwrap();
+        let response = authenticate(&get_hashset(), &request);
+        assert!(response.is_some());
+
+        // Expect a `307 Temporary Redirect`.
+        assert_eq!(307, response.as_ref().unwrap().status());
+    }
+
+    #[test]
+    fn test_bad_credentials_in_header() {
+        let request: Request<Body> = Request::builder()
+            .header(
+                "Authorization",
+                format!(
+                    "Basic {}",
+                    Base64::encode_string(BAD_CREDENTIALS.as_bytes())
+                ),
+            )
+            .body("".into())
+            .unwrap();
+        let response = authenticate(&get_hashset(), &request);
+        assert!(response.is_some());
+
+        // Expect a `401 Unauthorized` response.
+        assert_eq!(401, response.as_ref().unwrap().status());
+    }
+
+    #[test]
+    fn test_non_basic_credentials_in_header() {
+        let request: Request<Body> = Request::builder()
+            .header(
+                "Authorization",
+                format!("Advanced {}", Base64::encode_string(CREDENTIALS.as_bytes())),
+            )
+            .body("".into())
+            .unwrap();
+        let response = authenticate(&get_hashset(), &request);
+        assert!(response.is_some());
+
+        // Expect a `400 Bad Request` response.
+        assert_eq!(400, response.as_ref().unwrap().status());
+    }
+
+    #[test]
+    fn test_malformed_credentials_in_header() {
+        let request: Request<Body> = Request::builder()
+            .header(
+                "Authorization",
+                format!("Basic{}", Base64::encode_string(CREDENTIALS.as_bytes())),
+            )
+            .body("".into())
+            .unwrap();
+        let response = authenticate(&get_hashset(), &request);
+        assert!(response.is_some());
+
+        // Expect a `400 Bad Request` response.
+        assert_eq!(400, response.as_ref().unwrap().status());
+    }
 }
