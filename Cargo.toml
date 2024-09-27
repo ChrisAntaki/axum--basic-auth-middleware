@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = { version = "0.7.5", features = ["multipart"] }
-axum-extra = { version = "0.9.3", features = ["cookie"] }
+axum = { version = "0.7.6", features = ["multipart"] }
+axum-extra = { version = "0.9.4", features = ["cookie"] }
 base64ct = { version = "1.6.0", features = ["alloc"] }
 futures-util = "0.3.30"
 time = "0.3.36"
