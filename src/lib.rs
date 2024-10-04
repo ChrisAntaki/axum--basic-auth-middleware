@@ -157,7 +157,7 @@ mod tests {
     const BAD_CREDENTIALS: &str = "bad:pass";
 
     fn get_hashset() -> HashSet<&'static str> {
-        HashSet::from([CREDENTIALS])
+        BasicAuth::new(&[CREDENTIALS]).credentials
     }
 
     #[test]
