@@ -57,14 +57,15 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        // Authenticate the request.
-        if let Some(response) = authenticate(&self.credentials, &request) {
-            return Box::pin(async move { Ok(response) });
-        }
-
-        // Call the inner service.
+        let authentication_response = authenticate(&self.credentials, &request);
         let future = self.inner.call(request);
         Box::pin(async move {
+            // Handle authentication responses.
+            if let Some(authentication_response) = authentication_response {
+                return Ok(authentication_response);
+            }
+
+            // Handle normal responses.
             let response: Response = future.await?;
             Ok(response)
         })
