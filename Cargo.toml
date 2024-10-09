@@ -7,6 +7,6 @@ edition = "2021"
 axum = { version = "0.7.7", features = ["multipart"] }
 axum-extra = { version = "0.9.4", features = ["cookie"] }
 base64ct = { version = "1.6.0", features = ["alloc"] }
-futures-util = "0.3.30"
+futures-util = "0.3.31"
 time = "0.3.36"
 tower = "0.5.1"
