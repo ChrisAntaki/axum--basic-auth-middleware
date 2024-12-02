@@ -1,88 +1,91 @@
 use ::time::Duration;
-use axum::{
-    extract::Request,
-    response::{IntoResponse, Redirect, Response},
-};
+use axum::{body::Body, extract::Request, response::Response};
 use axum_extra::extract::{cookie::Cookie, CookieJar};
 use base64ct::{Base64, Encoding};
 use std::collections::HashSet;
 
-pub fn authenticate(credentials: &HashSet<&str>, request: &Request) -> Option<Response> {
+pub fn authenticate(credentials: &HashSet<&str>, request: &Request) -> Response {
     // Get headers.
     let headers = request.headers();
 
     // Check session cookie.
     let cookies = CookieJar::from_headers(headers);
     if let Some(cookie) = cookies.get("session") {
-        if credentials.contains(cookie.value()) {
+        let session = cookie.value();
+        if credentials.contains(session) {
             // Session cookie is valid.
-            return None;
+            // Reset the expiration timer by setting the cookie again.
+            return success(session);
         }
     }
 
-    // Check if the header is present.
+    // Check if authorization header is present.
     let auth = headers.get("Authorization");
     if let None = auth {
         return unauthorized();
     }
 
-    // Check if the header is well-formed.
+    // Check if authorization header is well-formed.
     let auth = auth.unwrap().to_str().unwrap();
     let split = auth.split_once(' ');
     if let None = split {
         return bad_request();
     }
 
-    // Check if the header is basic auth.
+    // Check if authorization header is basic.
     let (name, contents) = split.unwrap();
     if name != "Basic" {
         return bad_request();
     }
 
-    // Decode the contents.
+    // Decode contents.
     let decoded = Base64::decode_vec(contents).unwrap();
-    let decoded = std::str::from_utf8(decoded.as_slice()).unwrap();
+    let session = std::str::from_utf8(decoded.as_slice()).unwrap();
 
-    // Check if the credentials are valid.
-    if !credentials.contains(decoded) {
+    // Check if credentials are valid.
+    if !credentials.contains(session) {
         return unauthorized();
     }
 
-    // Set session cookie and redirect.
-    let cookie = Cookie::build(("session", decoded.to_owned()))
+    // Set session cookie.
+    success(session)
+}
+
+/// Returns a `200 OK` response with a session cookie.
+fn success(credentials: &str) -> Response {
+    // Create cookie.
+    let cookie = Cookie::build(("session", credentials))
         .http_only(true)
         .max_age(Duration::MAX)
         .same_site(axum_extra::extract::cookie::SameSite::Lax)
         .secure(true)
-        .build();
-    let cookies = cookies.add(cookie);
-    let path = request.uri().path_and_query().unwrap().as_str();
-    let redirect = Redirect::temporary(path);
-    let response = (cookies, redirect).into_response();
-    Some(response)
+        .to_string();
+
+    // Create response.
+    Response::builder()
+        .status(200)
+        .header("set-cookie", cookie)
+        .body(Body::empty())
+        .unwrap()
 }
 
 /// Returns a `400 Bad Request` response.
-fn bad_request() -> Option<Response> {
-    Some(
-        Response::builder()
-            .status(400)
-            // Meme response from WordPress.
-            .body("Error: Error establishing a database connection.".into())
-            .unwrap(),
-    )
+fn bad_request() -> Response {
+    Response::builder()
+        .status(400)
+        // Meme response from WordPress.
+        .body("Error: Error establishing a database connection.".into())
+        .unwrap()
 }
 
 /// Returns a `401 Unauthorized` response.
-fn unauthorized() -> Option<Response> {
-    Some(
-        Response::builder()
-            .status(401)
-            .header("WWW-Authenticate", "Basic realm=\"example\"")
-            // Slightly nicer looking response.
-            .body("<html><strong>Please</strong> sign in.</html>".into())
-            .unwrap(),
-    )
+fn unauthorized() -> Response {
+    Response::builder()
+        .status(401)
+        .header("WWW-Authenticate", "Basic realm=\"example\"")
+        // Slightly nicer looking response.
+        .body("<html><strong>Please</strong> sign in.</html>".into())
+        .unwrap()
 }
 
 #[cfg(test)]
@@ -93,18 +96,30 @@ mod tests {
     const CREDENTIALS: &str = "user:pass";
     const BAD_CREDENTIALS: &str = "bad:pass";
 
+    const COOKIE: &str =
+        "session=user:pass; HttpOnly; SameSite=Lax; Secure; Max-Age=9223372036854775807";
+
     fn get_hashset() -> HashSet<&'static str> {
         [CREDENTIALS].iter().cloned().collect()
+    }
+
+    fn get_session_cookie(response: &Response) -> String {
+        response
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
     }
 
     #[test]
     fn test_no_credentials() {
         let request: Request<Body> = Request::builder().body("".into()).unwrap();
         let response = authenticate(&get_hashset(), &request);
-        assert!(response.is_some());
 
         // Expect a `401 Unauthorized` response.
-        assert_eq!(401, response.as_ref().unwrap().status());
+        assert_eq!(401, response.status());
     }
 
     #[test]
@@ -115,9 +130,12 @@ mod tests {
             .unwrap();
         let response = authenticate(&get_hashset(), &request);
 
-        // Expect no response from this layer.
-        // The app can answer.
-        assert!(response.is_none());
+        // Expect a `200 OK` response.
+        assert_eq!(200, response.status());
+
+        // Expect a good cookie.
+        let cookie = get_session_cookie(&response);
+        assert_eq!(COOKIE, cookie);
     }
 
     #[test]
@@ -130,23 +148,13 @@ mod tests {
             .body("".into())
             .unwrap();
         let response = authenticate(&get_hashset(), &request);
-        assert!(response.is_some());
 
-        // Expect a `307 Temporary Redirect`.
-        let response = response.as_ref().unwrap();
-        assert_eq!(307, response.status());
+        // Expect a `200 OK` response.
+        assert_eq!(200, response.status());
 
         // Expect a good cookie.
-        let set_cookie = response
-            .headers()
-            .get("set-cookie")
-            .unwrap()
-            .to_str()
-            .unwrap();
-        assert!(set_cookie.contains("HttpOnly"));
-        assert!(set_cookie.contains("Max-Age=9223372036854775807"));
-        assert!(set_cookie.contains("SameSite=Lax"));
-        assert!(set_cookie.contains("Secure"));
+        let cookie = get_session_cookie(&response);
+        assert_eq!(COOKIE, cookie);
     }
 
     #[test]
@@ -162,10 +170,9 @@ mod tests {
             .body("".into())
             .unwrap();
         let response = authenticate(&get_hashset(), &request);
-        assert!(response.is_some());
 
         // Expect a `401 Unauthorized` response.
-        assert_eq!(401, response.as_ref().unwrap().status());
+        assert_eq!(401, response.status());
     }
 
     #[test]
@@ -178,10 +185,9 @@ mod tests {
             .body("".into())
             .unwrap();
         let response = authenticate(&get_hashset(), &request);
-        assert!(response.is_some());
 
         // Expect a `400 Bad Request` response.
-        assert_eq!(400, response.as_ref().unwrap().status());
+        assert_eq!(400, response.status());
     }
 
     #[test]
@@ -194,9 +200,8 @@ mod tests {
             .body("".into())
             .unwrap();
         let response = authenticate(&get_hashset(), &request);
-        assert!(response.is_some());
 
         // Expect a `400 Bad Request` response.
-        assert_eq!(400, response.as_ref().unwrap().status());
+        assert_eq!(400, response.status());
     }
 }

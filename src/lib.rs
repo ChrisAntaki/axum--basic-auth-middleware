@@ -57,18 +57,33 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        match authenticate(&self.credentials, &request) {
-            Some(response) => {
-                // Authentication response.
-                Box::pin(async { Ok(response) })
+        let authentication_response = authenticate(&self.credentials, &request);
+        let future = self.inner.call(request);
+
+        Box::pin(async {
+            // Handle authentication issues.
+            if authentication_response.status() != 200 {
+                return Ok(authentication_response);
             }
-            None => {
-                // Service response.
-                let response = self.inner.call(request);
-                Box::pin(async { Ok(response.await?) })
-            }
-        }
+
+            // Add session cookie.
+            let mut service_response = future.await?;
+            add_session_cookie(authentication_response, &mut service_response);
+
+            Ok(service_response)
+        })
     }
+}
+
+/// Adds session cookie from an authentication response to a service response.
+fn add_session_cookie(authentication_response: Response, service_response: &mut Response) {
+    let value = authentication_response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .clone();
+
+    service_response.headers_mut().append("set-cookie", value);
 }
 
 #[cfg(test)]
@@ -89,5 +104,27 @@ mod tests {
 
         // Verify credentials are set.
         assert!(new_service.credentials.contains(CREDENTIALS));
+    }
+
+    #[test]
+    fn test_add_session_cookie() {
+        // Create service response.
+        let mut service_response = Response::new(Body::empty());
+
+        // Add session cookie from an authentication response.
+        let authentication_response = Response::builder()
+            .header("set-cookie", "session=user:pass")
+            .body(Body::empty())
+            .unwrap();
+        add_session_cookie(authentication_response, &mut service_response);
+
+        // Verify session cookie was added to service response.
+        let cookie = service_response
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(cookie, "session=user:pass");
     }
 }
