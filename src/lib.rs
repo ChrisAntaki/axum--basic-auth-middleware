@@ -87,6 +87,8 @@ mod tests {
             Ok::<Response<Body>, axum::Error>(Response::new(Body::empty()))
         });
         let new_service = basic_auth.layer(tower_service);
+
+        // Verify credentials are set.
         assert!(new_service.credentials.contains(CREDENTIALS));
     }
 }
