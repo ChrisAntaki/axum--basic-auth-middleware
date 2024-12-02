@@ -50,9 +50,10 @@ pub fn authenticate(credentials: &HashSet<&str>, request: &Request) -> Option<Re
 
     // Set session cookie and redirect.
     let cookie = Cookie::build(("session", decoded.to_owned()))
-        .same_site(axum_extra::extract::cookie::SameSite::Lax)
         .http_only(true)
         .max_age(Duration::MAX)
+        .same_site(axum_extra::extract::cookie::SameSite::Lax)
+        .secure(true)
         .build();
     let cookies = cookies.add(cookie);
     let path = request.uri().path_and_query().unwrap().as_str();
@@ -135,14 +136,17 @@ mod tests {
         let response = response.as_ref().unwrap();
         assert_eq!(307, response.status());
 
-        // Expect a `set-cookie` cookie with a max age.
+        // Expect a good cookie.
         let set_cookie = response
             .headers()
             .get("set-cookie")
             .unwrap()
             .to_str()
             .unwrap();
+        assert!(set_cookie.contains("HttpOnly"));
         assert!(set_cookie.contains("Max-Age=9223372036854775807"));
+        assert!(set_cookie.contains("SameSite=Lax"));
+        assert!(set_cookie.contains("Secure"));
     }
 
     #[test]
