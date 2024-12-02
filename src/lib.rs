@@ -39,7 +39,7 @@ pub struct BasicAuthMiddleware<S> {
     credentials: HashSet<&'static str>,
 }
 
-/// Disable coverage for for now.
+/// Disable coverage for now.
 /// Not sure how to mock service w/ correct trait bounds.
 #[cfg(not(tarpaulin_include))]
 impl<S> Service<Request> for BasicAuthMiddleware<S>
