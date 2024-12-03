@@ -56,7 +56,7 @@ fn success(credentials: &str) -> Response {
     // Create cookie.
     let cookie = Cookie::build(("session", credentials))
         .http_only(true)
-        .max_age(Duration::MAX)
+        .max_age(Duration::days(400))
         .path("/")
         .same_site(axum_extra::extract::cookie::SameSite::Lax)
         .secure(true)
@@ -98,7 +98,7 @@ mod tests {
     const BAD_CREDENTIALS: &str = "bad:pass";
 
     const COOKIE: &str =
-        "session=user:pass; HttpOnly; SameSite=Lax; Secure; Path=/; Max-Age=9223372036854775807";
+        "session=user:pass; HttpOnly; SameSite=Lax; Secure; Path=/; Max-Age=34560000";
 
     fn get_hashset() -> HashSet<&'static str> {
         [CREDENTIALS].iter().cloned().collect()
