@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = { version = "0.7.9", features = ["multipart"] }
-axum-extra = { version = "0.9.6", features = ["cookie"] }
+axum = { version = "0.8.1", features = ["multipart"] }
+axum-extra = { version = "0.10.0", features = ["cookie"] }
 base64ct = { version = "1.6.0", features = ["alloc"] }
 futures-util = "0.3.31"
-time = "0.3.36"
-tower = "0.5.1"
+time = "0.3.37"
+tower = "0.5.2"
 
 [dev-dependencies]
 tower-test = "0.4.0"
